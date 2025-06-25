@@ -1,13 +1,14 @@
 import asyncio
 import logging
 from pyrogram import Client, filters
-from pyrogram.types import Message, Chat
+from pyrogram.types import Message
 import os
 
 # ------------------- Configuration -------------------
 API_ID = 24344133
 API_HASH = 'edbe7000baef13fa5a6c45c8edc4be66'
 BOT_TOKEN = '7462968272:AAG0wqZYfc4jbxKOIzewSF27qn98twGbaN8'
+ADMIN_CHAT_ID = 1234567890  # Replace with your admin user ID or a private group/channel ID for logging
 
 SESSION_DIR = "session"
 os.makedirs(SESSION_DIR, exist_ok=True)
@@ -28,18 +29,33 @@ app = Client(
 )
 
 # ------------------- User Data -------------------
-user_channels = {}
+user_channels = {}  # Structure: {user_id: {"channels": [{"source": id, "target": id}], "active": True, "step": ...}}
 
 
-# ------------------- Handlers -------------------
+# ------------------- Start Command -------------------
 @app.on_message(filters.command("start"))
 async def start_command(client, message: Message):
     user_id = message.from_user.id
-    user_channels[user_id] = {"step": "awaiting_source"}
+    user_channels[user_id] = {"channels": [], "step": "awaiting_source", "active": True}
+
     await message.reply_text("👋 Welcome! Please send the **Source Channel ID** (Example: -1001234567890).")
 
 
-@app.on_message(filters.text & ~filters.command(["start"]))
+# ------------------- Stop Command -------------------
+@app.on_message(filters.command("stop"))
+async def stop_command(client, message: Message):
+    user_id = message.from_user.id
+
+    if user_id in user_channels:
+        user_channels[user_id]["active"] = False
+        await message.reply_text("⏸️ Forwarding stopped.")
+        await app.send_message(ADMIN_CHAT_ID, f"🛑 User {user_id} has stopped forwarding.")
+    else:
+        await message.reply_text("❗ You haven't started yet. Please use /start first.")
+
+
+# ------------------- Message Handler -------------------
+@app.on_message(filters.text & ~filters.command(["start", "stop"]))
 async def get_channel_ids(client, message: Message):
     user_id = message.from_user.id
 
@@ -52,7 +68,7 @@ async def get_channel_ids(client, message: Message):
     if user_data["step"] == "awaiting_source":
         try:
             source_id = int(message.text.strip())
-            user_data["source_channel"] = source_id
+            user_data["current_source"] = source_id
             user_data["step"] = "awaiting_target"
             await message.reply_text("✅ Source Channel saved!\nNow, please send the **Target Channel ID**.")
         except ValueError:
@@ -61,35 +77,46 @@ async def get_channel_ids(client, message: Message):
     elif user_data["step"] == "awaiting_target":
         try:
             target_id = int(message.text.strip())
-            # Check if bot can post in target channel
-            chat: Chat = await client.get_chat(target_id)
-            if not chat.permissions or not chat.permissions.can_send_messages:
-                await message.reply_text("❗ Bot may not have permission to post in this channel. Please make sure the bot is an admin with post rights.")
-                return
-
-            user_data["target_channel"] = target_id
-            user_data["step"] = "ready"
+            user_data["channels"].append({"source": user_data["current_source"], "target": target_id})
+            user_data["step"] = "awaiting_source"  # Allow adding more channel pairs
 
             await message.reply_text(
-                f"✅ Target Channel saved!\n\n🔄 Now auto-forwarding messages from `{user_data['source_channel']}` to `{user_data['target_channel']}` with a 2s delay.\n\n👉 Make sure the bot is a **member in the source channel** and **admin in the target channel**."
+                f"✅ Target Channel saved!\n\n🔄 Forwarding from `{user_data['current_source']}` to `{target_id}` with a 2s delay.\n\n👉 You can now add another source channel or type /stop to pause forwarding."
             )
+
+            await app.send_message(
+                ADMIN_CHAT_ID,
+                f"✅ User {user_id} set forwarding:\nSource: `{user_data['current_source']}`\nTarget: `{target_id}`"
+            )
+
         except ValueError:
             await message.reply_text("❗ Please enter a valid numeric Channel ID.")
         except Exception as e:
-            logger.error(f"Error while verifying target channel: {e}")
-            await message.reply_text("❗ Could not access target channel. Make sure the bot is added and has permission.")
+            logger.error(f"Error while saving target channel: {e}")
+            await message.reply_text("❗ An unexpected error occurred. Please try again.")
 
 
+# ------------------- Forwarding Handler -------------------
 @app.on_message(filters.channel)
 async def forward_messages(client, message: Message):
     for user_id, user_data in user_channels.items():
-        if user_data.get("step") == "ready" and message.chat.id == user_data["source_channel"]:
-            try:
-                await asyncio.sleep(2)  # 2 second delay
-                await message.copy(chat_id=user_data["target_channel"])
-                logger.info(f"✅ Forwarded message ID {message.id} from {user_data['source_channel']} to {user_data['target_channel']}")
-            except Exception as e:
-                logger.error(f"❌ Error forwarding message ID {message.id}: {e}")
+        if user_data.get("active"):
+            for channel_pair in user_data.get("channels", []):
+                if message.chat.id == channel_pair["source"]:
+                    try:
+                        await asyncio.sleep(2)
+                        await message.copy(chat_id=channel_pair["target"])
+
+                        log_msg = f"✅ Forwarded message ID {message.id} from {channel_pair['source']} to {channel_pair['target']} (User {user_id})"
+                        logger.info(log_msg)
+
+                        # Log to admin
+                        await app.send_message(ADMIN_CHAT_ID, log_msg)
+
+                    except Exception as e:
+                        error_msg = f"❌ Error forwarding message ID {message.id}: {e}"
+                        logger.error(error_msg)
+                        await app.send_message(ADMIN_CHAT_ID, error_msg)
 
 
 # ------------------- Start Bot -------------------
