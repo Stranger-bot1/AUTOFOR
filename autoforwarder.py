@@ -104,7 +104,7 @@ async def forward_messages(client, message: Message):
             for channel_pair in user_data.get("channels", []):
                 if message.chat.id == channel_pair["source"]:
                     try:
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(2)  # 2 second delay
                         await message.copy(chat_id=channel_pair["target"])
 
                         log_msg = f"✅ Forwarded message ID {message.id} from {channel_pair['source']} to {channel_pair['target']} (User {user_id})"
@@ -117,9 +117,7 @@ async def forward_messages(client, message: Message):
                         error_msg = f"❌ Error forwarding message ID {message.id}: {e}"
                         logger.error(error_msg)
                         await app.send_message(ADMIN_CHAT_ID, error_msg)
-
-
-# ------------------- Start Bot -------------------
+------
 if __name__ == "__main__":
     logger.info("🚀 Bot is starting...")
     app.run()
