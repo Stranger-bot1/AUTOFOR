@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 # Bot credentials
 api_id = 24344133
 api_hash = "edbe7000baef13fa5a6c45c8edc4be66"
-bot_token = "7462968272:AAG0wqZYfc4jbxKOIzewSF27qn98twGbaN8"
+bot_token = "8199231851:AAHo__Dj2UMey0jbX6DkAdQE_F4bYYOdtSA"
 
 # Admin chat ID (send logs here)
 ADMIN_CHAT_ID = 123456789  # Replace with your Telegram user ID
